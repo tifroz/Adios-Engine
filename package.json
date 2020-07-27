@@ -1,6 +1,6 @@
 {
   "name": "adios-engine",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "ABP rules => Safari content blocker rules",
   "author": "Armand Grillet <armand.grillet@outlook.com> (http://armand.gr)",
   "license": "GPL-3.0",
@@ -11,7 +11,7 @@
     "nodeunit": "^0.9.1"
   },
   "engines": {
-    "node": "latest"
+    "node": ">=8.0.0"
   },
   "repository": {
     "type": "git",

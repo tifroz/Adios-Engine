@@ -173,14 +173,23 @@ function getTrigger(rule) {
         // Domains
         for (option in options) {
             if (options[option].indexOf('domain=') === 0) {
-                // Type of the domain
-                var typeDomain;
-                if (options[option].substring('domain='.length).hasTidle()) {
-                    typeDomain = 'unless-domain';
-                } else {
-                    typeDomain = 'if-domain';
+                var domains = options[option].substring('domain='.length).split('|')
+                var unlessDomain = []
+                var ifDomain = []
+                var domain
+                for (domain of domains) {
+                    if (domain.hasTidle()) {
+                        unlessDomain.push(addWildcard(domain.replace(/~/g, '')))
+                    } else {
+                        ifDomain.push(addWildcard(domain))
+                    }
                 }
-                trigger[typeDomain] = options[option].substring('domain='.length).replace(/~/g, '').split('|').map(addWildcard);
+                if (unlessDomain.length > 0) {
+                    trigger['unless-domain'] = unlessDomain
+                }
+                if (ifDomain.length > 0) {
+                    trigger['if-domain'] = ifDomain
+                }
             }
         }
     }
@@ -274,7 +283,10 @@ module.exports = {
             if (rule.indexOf('##') === -1 && rule.indexOf('#@#') === -1) { // It is not element hiding
                 trigger = getTrigger(rule);
                 if (/^[ -~]+$/.test(trigger['url-filter'])) {
-                    return [{'trigger': getTrigger(rule), 'action': getAction(rule)}];
+                    if (trigger['if-domain'] && trigger ['unless-domain']) {
+                        delete trigger ['unless-domain']
+                    }
+                    return [{'trigger': trigger, 'action': getAction(rule)}];
                 }
             } else { // It is element hiding
                 var domain;

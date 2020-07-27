@@ -1,3 +1,9 @@
+# Preamble
+
+Forked from [this project](https://github.com/ArmandGrillet/Adios-Engine), for the purpose of fixing bugs.
+
+One Bug fix at the moment: when easylist domain options start with a `~` (exclude domain), all domains are lumped indiscrimminately into an Apple Content Filter `unless-domain` condition, potentially resulting in very large portions of website resources getting blocked. The imperfect but simple fix applied will ignore `unless-domain` conditions if at least one `if-domain` condition is present
+
 # Adios Engine
 
 A small library to transform standard AdBlock Plus rules like [EasyList](https://easylist-downloads.adblockplus.org/easylist.txt) into [rules working in Safari](https://www.webkit.org/blog/3476/content-blockers-first-look/).
