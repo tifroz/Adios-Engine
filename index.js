@@ -57,7 +57,9 @@ function getTrigger(rule) {
     var urlFilter = rule;
 
     // Remove additional informations
-    if (urlFilter.indexOf('$') > 0) {
+    if (urlFilter.indexOf('$') === 0) {
+        urlFilter = "";
+    } else if (urlFilter.indexOf('$') > 0) {
         urlFilter = urlFilter.substring(0, urlFilter.indexOf('$'));
     }
 
@@ -254,11 +256,11 @@ function getElementHidingAction(rule) {
 }
 
 function getKey(comment) {
-    return {comment};
+    return { comment };
 }
 
 function getValue(comment) {
-    return {comment};
+    return { comment };
 }
 
 /* Miscellaneous methods */
@@ -266,102 +268,154 @@ function addWildcard(e) {
     return '*' + e;
 }
 
-String.prototype.hasTidle = function() {
+String.prototype.hasTidle = function () {
     if (this.substring(0, 1) === '~') {
         return true;
     }
     return false;
 };
 
+
+function parseRule(rule) {
+    if (isAllowed(rule)) {
+        var trigger;
+        var action;
+        if (rule.indexOf('##') === -1 && rule.indexOf('#@#') === -1) { // It is not element hiding
+            trigger = getTrigger(rule);
+            if (/^[ -~]+$/.test(trigger['url-filter'])) {
+                if (trigger['if-domain'] && trigger['unless-domain']) {
+                    delete trigger['unless-domain']
+                }
+                return [{ 'trigger': trigger, 'action': getAction(rule) }];
+            }
+        } else { // It is element hiding
+            var domain;
+            if (rule.indexOf('#@#') !== -1) { // Exception rule syntax, we transform the rule for a standard syntax
+                var domains = rule.substring(0, rule.indexOf('#@#')).split(',');
+                var newDomains = [];
+                for (domain in domains) {
+                    if (domains[domain].hasTidle()) {
+                        newDomains.push(domains[domain].slice(1));
+                    } else {
+                        newDomains.push('~' + domains[domain]);
+                    }
+                }
+                rule = newDomains.join() + '##' + rule.substring(rule.indexOf('#@#') + 3);
+            }
+
+            trigger = getElementHidingTrigger(rule);
+            action = getElementHidingAction(rule);
+
+            if (trigger['if-domain'] !== undefined && trigger['unless-domain'] !== undefined) { // if-domain + unless-domain = not possible!
+                if (trigger['if-domain'].length === 1) { // Only one if, we can manage that.
+                    trigger['url-filter'] = String.raw`^(?:[^:/?#]+:)?(?://(?:[^/?#]*\.)?)?` + trigger['if-domain'][0].replace(/[.$+?{}()\[\]\\]/g, '\\$&') + String.raw`[^a-z\-A-Z0-9._.%]`;
+                    delete trigger['if-domain'];
+                    trigger['unless-domain'] = trigger['unless-domain'].map(addWildcard);
+                    return [{ 'trigger': trigger, 'action': action }];
+                } else {
+                    var rules = [];
+
+                    var regularDomains = []; // Only if, no unless.
+
+                    var ifDomains = trigger['if-domain'];
+                    var unlessDomains = trigger['unless-domain'];
+                    var ifDomain;
+                    var unlessDomain;
+
+                    for (ifDomain in ifDomains) {
+                        var ifAndUnlessDomain = false;
+                        for (unlessDomain in unlessDomains) {
+                            if (unlessDomains[unlessDomain].indexOf(ifDomains[ifDomain]) > -1) {
+                                ifAndUnlessDomain = true;
+                            }
+                        }
+                        if (ifAndUnlessDomain) { // There is an if and unless for this domain.
+                            var ifUnlessDomains = [];
+                            for (unlessDomain in unlessDomains) {
+                                if (unlessDomains[unlessDomain].indexOf(ifDomains[ifDomain]) > -1) {
+                                    ifUnlessDomains.push(unlessDomains[unlessDomain]);
+                                }
+                            }
+                            var newRule = ifDomains[ifDomain] + ',~' + ifUnlessDomains.join(',~') + '##' + rule.substring(rule.indexOf('##') + 2);
+                            rules.push(this.parseRule(newRule)[0]);
+                        } else { // Only if for this domain.
+                            regularDomains.push(ifDomains[ifDomain]);
+                        }
+                    }
+
+                    var lastRule = regularDomains.join() + '##' + rule.substring(rule.indexOf('##') + 2);
+                    rules.push(this.parseRule(lastRule)[0]);
+                    return rules;
+                }
+            } else {
+                if (trigger['if-domain'] !== undefined) {
+                    trigger['if-domain'] = trigger['if-domain'].map(addWildcard);
+                } else if (trigger['unless-domain'] !== undefined) {
+                    trigger['unless-domain'] = trigger['unless-domain'].map(addWildcard);
+                }
+                return [{ 'trigger': trigger, 'action': action }];
+            }
+        }
+    }
+    return [];
+}
+
+
+/* Inserts additional rules to address the discepancy between EasyList 'third-party' (exclude subdomains of current domain), and Apple's 'third-party' (includes subdomains)*/
+function postProcessRules(rules) {
+    var allowSubdomainRules = [];
+    for (var index = 0; index < rules.length; index++) {
+        var rule = rules[index];
+        if (!rule.trigger) {
+            continue
+        }
+        var trigger = rule.trigger
+        var ifDomain = trigger["if-domain"]
+        var loadType = trigger["load-type"]
+        var loadTypeBool = (loadType) && loadType.indexOf("third-party") >= 0
+        var resType = trigger["resource-type"]
+        var resTypeBool = (!resType) || (resType.indexOf("script") >= 0 || resType.indexOf("style-sheet") >= 0)
+        var actionTypeBool = (rule.action) && (rule.action.type === "block")
+        if (ifDomain && loadTypeBool && actionTypeBool && resTypeBool) {
+            var allowUrlPrefix = "^(?:[^:]+:)(?://(?:[^/?#]*\\.)?)";
+            var allowUrlSuffix = "[^a-z\\-A-Z0-9._.%]";
+            for (var k = 0; k < ifDomain.length; k++) {
+                var domain = ifDomain[k];
+                var subDomainPattern = (domain.startsWith("*") ? domain.substring(1) : domain).replace(/\./g, "\\.");
+                var allowUrlFilter = `${allowUrlPrefix}${subDomainPattern}${allowUrlSuffix}`;
+                var allowLoadTypes = loadType.filter(function(type){return type !== "third-party"})
+                var allowLoadType = allowLoadTypes.length > 0 ? allowLoadTypes : undefined
+                var allowSubdomainRule = {
+                    comment: "Inserted to whitelist subdomain resources. Ref url-filter: '"+rule.trigger["url-filter"]+"'",
+                    action: {
+                        type: "ignore-previous-rules"
+                    },
+                    trigger: {
+                        "if-domain": [domain],
+                        "load-type": allowLoadType,
+                        "resource-type": rule.trigger["resource-type"],
+                        "url-filter": allowUrlFilter
+                    }
+                };
+                //console.log(`Adding subdomain whitelist rule\n${JSON.stringify(allowSubdomainRule, null, 2)}`);
+                allowSubdomainRules.push(allowSubdomainRule);
+            }
+        }
+    }
+    rules = rules.concat(allowSubdomainRules);
+    return rules;
+};
+
 module.exports = {
-    parseRules: function(rules) {
+    parseRules: function (rules) {
         var parsedRules = [];
         for (let rule of rules) {
             parsedRules = parsedRules.concat(this.parseRule(rule));
-        } 
+        }
         return parsedRules;
     },
-    parseRule: function(rule) {
-        if (isAllowed(rule)) {
-            var trigger;
-            var action;
-            if (rule.indexOf('##') === -1 && rule.indexOf('#@#') === -1) { // It is not element hiding
-                trigger = getTrigger(rule);
-                if (/^[ -~]+$/.test(trigger['url-filter'])) {
-                    if (trigger['if-domain'] && trigger ['unless-domain']) {
-                        delete trigger ['unless-domain']
-                    }
-                    return [{'trigger': trigger, 'action': getAction(rule)}];
-                }
-            } else { // It is element hiding
-                var domain;
-                if (rule.indexOf('#@#') !== -1) { // Exception rule syntax, we transform the rule for a standard syntax
-                    var domains = rule.substring(0, rule.indexOf('#@#')).split(',');
-                    var newDomains = [];
-                    for (domain in domains) {
-                        if (domains[domain].hasTidle()) {
-                            newDomains.push(domains[domain].slice(1));
-                        } else {
-                            newDomains.push('~' + domains[domain]);
-                        }
-                    }
-                    rule = newDomains.join() + '##' + rule.substring(rule.indexOf('#@#') + 3);
-                }
-
-                trigger = getElementHidingTrigger(rule);
-                action = getElementHidingAction(rule);
-
-                if (trigger['if-domain'] !== undefined && trigger['unless-domain'] !== undefined) { // if-domain + unless-domain = not possible!
-                    if (trigger['if-domain'].length === 1) { // Only one if, we can manage that.
-                        trigger['url-filter'] = String.raw`^(?:[^:/?#]+:)?(?://(?:[^/?#]*\.)?)?` + trigger['if-domain'][0].replace(/[.$+?{}()\[\]\\]/g, '\\$&') + String.raw`[^a-z\-A-Z0-9._.%]`;
-                        delete trigger['if-domain'];
-                        trigger['unless-domain'] = trigger['unless-domain'].map(addWildcard);
-                        return [{'trigger': trigger, 'action': action}];
-                    } else {
-                        var rules = [];
-
-                        var regularDomains = []; // Only if, no unless.
-
-                        var ifDomains = trigger['if-domain'];
-                        var unlessDomains = trigger['unless-domain'];
-                        var ifDomain;
-                        var unlessDomain;
-
-                        for (ifDomain in ifDomains) {
-                            var ifAndUnlessDomain = false;
-                            for (unlessDomain in unlessDomains) {
-                                if (unlessDomains[unlessDomain].indexOf(ifDomains[ifDomain]) > -1) {
-                                    ifAndUnlessDomain = true;
-                                }
-                            }
-                            if (ifAndUnlessDomain) { // There is an if and unless for this domain.
-                                var ifUnlessDomains = [];
-                                for (unlessDomain in unlessDomains) {
-                                    if (unlessDomains[unlessDomain].indexOf(ifDomains[ifDomain]) > -1) {
-                                        ifUnlessDomains.push(unlessDomains[unlessDomain]);
-                                    }
-                                }
-                                var newRule = ifDomains[ifDomain] + ',~' + ifUnlessDomains.join(',~') + '##' + rule.substring(rule.indexOf('##') + 2);
-                                rules.push(this.parseRule(newRule)[0]);
-                            } else { // Only if for this domain.
-                                regularDomains.push(ifDomains[ifDomain]);
-                            }
-                        }
-
-                        var lastRule = regularDomains.join() + '##' + rule.substring(rule.indexOf('##') + 2);
-                        rules.push(this.parseRule(lastRule)[0]);
-                        return rules;
-                    }
-                } else {
-                    if (trigger['if-domain'] !== undefined ) {
-                        trigger['if-domain'] = trigger['if-domain'].map(addWildcard);
-                    } else if (trigger['unless-domain'] !== undefined ) {
-                        trigger['unless-domain'] = trigger['unless-domain'].map(addWildcard);
-                    }
-                    return [{'trigger': trigger, 'action': action}];
-                }
-            }
-        }
-        return [];
+    parseRule: function (rule) {
+        var parsedRule = parseRule(rule)
+        return postProcessRules(parsedRule)
     }
 };
