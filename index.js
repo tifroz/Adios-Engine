@@ -21,6 +21,11 @@ function isAllowed(rule) {
         return false;
     }
 
+    // AdBlock extended css selectors have no native equivalent in Safari
+    if (rule.indexOf('#?#') > 0) {
+        return false;
+    }
+
     // Unavailable resource type.
     if (rule.indexOf('\$') > 0) { // There is options
         var options = rule.substring(rule.indexOf('\$') + 1).split(',');
