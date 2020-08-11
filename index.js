@@ -1,5 +1,11 @@
 'use strict';
 
+var allowedResourceTypes = [ // No 'object' because iOS devices don't manage Java or Flash.
+            'document', 'script', 'image', 'stylesheet', 'xmlhttprequest', 'subdocument', 'media', 'popup',
+            '~document', '~script', '~image', '~stylesheet', '~xmlhttprequest', '~object', '~object-subrequest', '~subdocument', '~websocket', '~webrtc'
+        ];
+var allowedActivationTypes = ['third-party', '~third-party']
+
 function isAllowed(rule) {
     // Empty rule.
     if (rule.length === 0) {
@@ -26,23 +32,26 @@ function isAllowed(rule) {
         return false;
     }
 
-    // Unavailable resource type.
-    if (rule.indexOf('\$') > 0) { // There is options
-        var options = rule.substring(rule.indexOf('\$') + 1).split(',');
-        var allowedResourceTypes = [ // No 'object' because iOS devices don't manage Java or Flash.
-            'document', 'script', 'image', 'stylesheet', 'xmlhttprequest', 'subdocument',
-            '~document', '~script', '~image', '~stylesheet', '~xmlhttprequest', '~object', '~object-subrequest', '~subdocument'
-        ];
-        var allowedResourceType;
-        var ruleOnlyWithUnavailableResourceTypes = true;
-        for (allowedResourceType in allowedResourceTypes) {
-            if (options.indexOf(allowedResourceTypes[allowedResourceType]) > -1) {
-                ruleOnlyWithUnavailableResourceTypes = false;
+    // Filter out rules that only apply to a resource type we can't handle
+    // ...we don't explicitely list the list of unhandled resource types because it could wreak havoc if a new type is introduced in easylist
+    if (rule.indexOf('\$') >= 0) { // There is options
+        var options = rule.substring(rule.indexOf('\$') + 1).split(',').filter(function(o){return !o.startsWith("domain=")});
+        var ruleHasAvailableResourceTypes = false;
+        for (var index in allowedResourceTypes) {
+            if (options.indexOf(allowedResourceTypes[index]) > -1) {
+                ruleHasAvailableResourceTypes = true;
             }
         }
-        if (ruleOnlyWithUnavailableResourceTypes && (options.indexOf('object') > -1 || options.indexOf('object-subrequest') > -1)) {
-            return false;
+        var countOfActivationTypes = 0
+        for (var index in allowedActivationTypes) {
+            if (options.indexOf(allowedActivationTypes[index]) > -1) {
+                countOfActivationTypes += 1;
+            }
         }
+        if (countOfActivationTypes === options.length) { // The rule applies to all resource types
+            return true
+        }
+        return ruleHasAvailableResourceTypes
     }
     return true;
 }
@@ -57,10 +66,12 @@ function getTrigger(rule) {
     var urlFilter = rule;
 
     // Remove additional informations
-    if (urlFilter.indexOf('$') === 0) {
-        urlFilter = "";
-    } else if (urlFilter.indexOf('$') > 0) {
+    if (urlFilter.indexOf('$') >= 0) {
         urlFilter = urlFilter.substring(0, urlFilter.indexOf('$'));
+    }
+
+    if (urlFilter.length === 0) {
+        urlFilter = '*'
     }
 
     // Remove exception characters
@@ -104,7 +115,7 @@ function getTrigger(rule) {
     // Getting the options //
     /////////////////////////
 
-    if (rule.indexOf('\$') > 0) { // There is options
+    if (rule.indexOf('\$') >= 0) { // There is options
         var options = rule.substring(rule.indexOf('\$') + 1).split(',');
         var option;
 
@@ -114,10 +125,6 @@ function getTrigger(rule) {
         }
 
         // Resource types
-        var allowedResourceTypes = [ // No 'object' because iOS devices don't manage Java or Flash.
-            'document', 'script', 'image', 'stylesheet', 'xmlhttprequest', 'subdocument',
-            '~document', '~script', '~image', '~stylesheet', '~xmlhttprequest', '~object', '~object-subrequest', '~subdocument'
-        ];
         for (var allowedResourceType in allowedResourceTypes) {
             if (options.indexOf(allowedResourceTypes[allowedResourceType]) > -1) { // There is allowed resource types
                 var resourceTypes = [];
@@ -160,7 +167,6 @@ function getTrigger(rule) {
                             case 'xmlhttprequest':
                                 resourceTypes.push('raw');
                                 break;
-                            // TODO : Add other cases
                             default:
                                 break;
                         }
