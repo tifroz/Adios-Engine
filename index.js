@@ -161,6 +161,9 @@ function getTrigger(rule) {
                             case 'stylesheet':
                                 resourceTypes.push('style-sheet');
                                 break;
+                            case 'popup':
+                                resourceTypes.push('popup');
+                                break;
                             case 'subdocument':
                                 resourceTypes.push('popup'); // http://trac.webkit.org/browser/trunk/Source/WebCore/page/DOMWindow.cpp#L2149
                                 break;

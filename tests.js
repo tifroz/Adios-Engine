@@ -188,6 +188,18 @@ exports.testAdditionalInfoSix = function(test) {
     test.done();
 };
 
+exports.testPopupResourceType = function(test) {
+	var parsedRule = parser.parseRule('|http*://*?$popup,third-party,domain=pornhub.com')[0].trigger;
+	test.deepEqual(parsedRule['resource-type'], ['popup']);
+    test.done();
+};
+
+exports.testPopupAlongsideOtherResourceTypes = function(test) {
+	var parsedRule = parser.parseRule('||example.com^$script,popup')[0].trigger;
+	test.deepEqual(parsedRule['resource-type'], ['script', 'popup']);
+    test.done();
+};
+
 exports.testAdditionalInfoSeven = function(test) {
 	var parsedRule = parser.parseRule('/banner/*/img^$script,subdocument,~third-party')[0].trigger;
 	test.equal(parsedRule['load-type'][0], 'first-party');
@@ -337,4 +349,3 @@ exports.multipleRules = function(test) {
 	test.equal(rules[1].action.type, 'ignore-previous-rules');
 	test.done();
 };
-
